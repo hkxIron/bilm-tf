@@ -10,7 +10,7 @@ import numpy as np
 import tensorflow as tf
 
 from bilm.model import BidirectionalLanguageModel, dump_token_embeddings
-from bilm.data import Batcher, TokenBatcher
+from bilm.data import CharBatcher, TokenBatcher
 
 FIXTURES = 'fixtures/model/'
 
@@ -53,7 +53,7 @@ class TestBidirectionalLanguageModel(unittest.TestCase):
 
         # create the Batcher
         vocab_file = os.path.join(FIXTURES, 'vocab_test.txt')
-        batcher = Batcher(vocab_file, 50)
+        batcher = CharBatcher(vocab_file, 50)
 
         # load the model
         options_file = os.path.join(FIXTURES, 'options.json')

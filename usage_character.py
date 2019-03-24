@@ -7,7 +7,7 @@ a question and a paragraph of context.
 
 import tensorflow as tf
 import os
-from bilm import Batcher, BidirectionalLanguageModel, weight_layers
+from bilm import CharBatcher, BidirectionalLanguageModel, weight_layers
 
 # Location of pretrained LM.  Here we use the test fixtures.
 datadir = os.path.join('tests', 'fixtures', 'model')
@@ -16,7 +16,7 @@ options_file = os.path.join(datadir, 'options.json')
 weight_file = os.path.join(datadir, 'lm_weights.hdf5')
 
 # Create a Batcher to map text to character ids.
-batcher = Batcher(vocab_file, 50)
+batcher = CharBatcher(vocab_file, 50)
 
 # Input placeholders to the biLM.
 context_character_ids = tf.placeholder('int32', shape=(None, None, 50))

@@ -5,7 +5,7 @@ import os
 import numpy as np
 
 from bilm.data import UnicodeCharsVocabulary, Vocabulary, \
-    Batcher, TokenBatcher, LMDataset, BidirectionalLMDataset
+    CharBatcher, TokenBatcher, LMDataset, BidirectionalLMDataset
 
 DATA_FIXTURES = 'fixtures/data/'
 TRAIN_FIXTURES = 'fixtures/train/'
@@ -22,14 +22,14 @@ class TestVocabulary(unittest.TestCase):
     def test_vocab_encode(self):
         vocab = Vocabulary(self._tmp)
         sentence = 'the unknown .'
-        ids = vocab.encode(sentence)
+        ids = vocab.encode_sentence_to_token_ids(sentence)
         expected = np.array([0, 3, 2, 4, 1], dtype=np.int32)
         self.assertTrue((ids == expected).all())
 
     def test_vocab_encode_reverse(self):
         vocab = Vocabulary(self._tmp)
         sentence = '. unknown the'
-        ids = vocab.encode(sentence, reverse=True)
+        ids = vocab.encode_sentence_to_token_ids(sentence, reverse=True)
         expected = np.array([1, 4, 2, 3, 0], dtype=np.int32)
         self.assertTrue((ids == expected).all())
 
@@ -179,7 +179,7 @@ class TestBatcher(unittest.TestCase):
                 )
 
     def test_batch_sentences(self):
-        batcher = Batcher(os.path.join(DATA_FIXTURES, 'vocab_test.txt'), 50)
+        batcher = CharBatcher(os.path.join(DATA_FIXTURES, 'vocab_test.txt'), 50)
         sentences = [['The', 'first', 'sentence'], ['Second', '.']]
         x_char_ids = batcher.batch_sentences(sentences)
 

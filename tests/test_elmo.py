@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 
 from bilm.model import BidirectionalLanguageModel
-from bilm.data import Batcher
+from bilm.data import CharBatcher
 from bilm.elmo import weight_layers
 
 FIXTURES = 'fixtures/model/'
@@ -25,7 +25,7 @@ class TestWeightedLayers(unittest.TestCase):
     def _check_weighted_layer(self, l2_coef, do_layer_norm, use_top_only):
         # create the Batcher
         vocab_file = os.path.join(FIXTURES, 'vocab_test.txt')
-        batcher = Batcher(vocab_file, 50)
+        batcher = CharBatcher(vocab_file, 50)
 
         # load the model
         options_file = os.path.join(FIXTURES, 'options.json')

@@ -641,7 +641,6 @@ def _deduplicate_indexed_slices(values, indices):
       tf.shape(unique_indices)[0])
     return (summed_values, unique_indices)
 
-
 def _get_feed_dict_from_X(X, start, end, model, char_inputs, bidirectional):
     feed_dict = {}
     if not char_inputs:
@@ -687,8 +686,8 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
 
         # set up the optimizer
         lr = options.get('learning_rate', 0.2)
-        opt = tf.train.AdagradOptimizer(learning_rate=lr,
-                                        initial_accumulator_value=1.0)
+        optimizer = tf.train.AdagradOptimizer(learning_rate=lr,
+                                              initial_accumulator_value=1.0)
 
         # calculate the gradients on each GPU
         tower_grads = []
@@ -699,14 +698,14 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
         norm_summaries = []
         for k in range(n_gpus):
             with tf.device('/gpu:%d' % k):
-                with tf.variable_scope('lm', reuse=k > 0):
+                with tf.variable_scope('lm', reuse=k > 0):  # 妙,太妙了
                     # calculate the loss for one model replica and get
                     #   lstm states
-                    model = LanguageModel(options, True)
+                    model = LanguageModel(options, is_training=True)
                     loss = model.total_loss
                     models.append(model)
                     # get gradients
-                    grads = opt.compute_gradients(
+                    grads = optimizer.compute_gradients(
                         loss * options['unroll_steps'],
                         aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE,
                     )
@@ -741,7 +740,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                 tf.summary.histogram('lstm_embedding_1', lstm_out[1]))
 
         # apply the gradients to create the training operation
-        train_op = opt.apply_gradients(grads, global_step=global_step)
+        train_op = optimizer.apply_gradients(grads, global_step=global_step)
 
         # histograms of variables
         for v in tf.global_variables():
@@ -750,7 +749,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
         # get the gradient updates -- these aren't histograms, but we'll
         # only update them when histograms are computed
         histogram_summaries.extend(
-            summary_gradient_updates(grads, opt, lr))
+            summary_gradient_updates(grads, optimizer, lr))
 
         saver = tf.train.Saver(tf.global_variables(), max_to_keep=2)
         summary_op = tf.summary.merge(
@@ -880,7 +879,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
 
             if batch_no % 1250 == 0:
                 summary_writer.add_summary(ret[3], batch_no)
-            if batch_no % 100 == 0:
+            if batch_no % 20 == 0:
                 # write the summaries to tensorboard and display perplexity
                 summary_writer.add_summary(ret[1], batch_no)
                 print("Batch %s, train_perplexity=%s" % (batch_no, ret[2]))
@@ -1054,9 +1053,9 @@ def load_options_latest_checkpoint(tf_save_dir):
     return options, ckpt_file
 
 
-def load_vocab(vocab_file, max_word_length=None):
-    if max_word_length:
-        return UnicodeCharsVocabulary(vocab_file, max_word_length,
+def load_vocab(vocab_file, max_char_count_in_token=None):
+    if max_char_count_in_token:
+        return UnicodeCharsVocabulary(vocab_file, max_char_count_in_token,
                                       validate_file=True)
     else:
         return Vocabulary(vocab_file, validate_file=True)

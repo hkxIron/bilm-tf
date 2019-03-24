@@ -89,7 +89,7 @@ class Vocabulary(object):
         #  将一个ids序列转化为word序列
         return ' '.join([self.id_to_word(cur_id) for cur_id in cur_ids])
 
-    def encode(self, sentence, reverse=False, split=True):
+    def encode_sentence_to_token_ids(self, sentence, reverse=False, split=True):
         """Convert a sentence to a list of ids, with special tokens added.
         Sentence is a single string with tokens separated by whitespace.
 
@@ -229,7 +229,7 @@ class UnicodeCharsVocabulary(Vocabulary):
             return np.vstack([self.bos_char_ids] + chars_ids + [self.eos_char_ids])
 
 
-class Batcher(object):
+class CharBatcher(object): # change to char_id matrix
     ''' 
     Batch sentences of tokenized text into character id matrices.
     '''
@@ -273,7 +273,7 @@ class Batcher(object):
         return X_char_ids
 
 
-class TokenBatcher(object):
+class TokenBatcher(object): # change to token id matrix
     ''' 
     Batch sentences of tokenized text into token id matrices.
     '''
@@ -291,33 +291,36 @@ class TokenBatcher(object):
         [['The', 'first', 'sentence', '.'], ['Second', '.']]
         '''
         n_sentences = len(sentences)
-        max_length = max(len(sentence) for sentence in sentences) + 2
-
-        X_ids = np.zeros((n_sentences, max_length), dtype=np.int64)
+        max_token_count_in_sentence = max(len(sentence) for sentence in sentences) + 2
+        # [batch, max_token_count_in_sentence]
+        X_ids = np.zeros((n_sentences, max_token_count_in_sentence), dtype=np.int64)
 
         for k, sent in enumerate(sentences):
             length = len(sent) + 2
-            ids_without_mask = self._lm_vocab.encode(sent, split=False)
+            ids_without_mask = self._lm_vocab.encode_sentence_to_token_ids(sent, split=False)
             # add one so that 0 is the mask value
             X_ids[k, :length] = ids_without_mask + 1
 
+        # [batch, max_token_count_in_sentence]
         return X_ids
 
 
 ##### for training
-def _get_batch(generator, batch_size, num_steps, max_word_length):
+# generator: 生成 (token_ids, char_ids)
+# 返回: token_inputs, char_inputs, target_tokens
+def _get_batch(generator, batch_size, num_steps, max_token_count_in_sentence):
     """Read batches of input."""
     cur_stream = [None] * batch_size
 
     no_more_data = False
     while True:
-        inputs = np.zeros([batch_size, num_steps], np.int32)
-        if max_word_length is not None:
-            char_inputs = np.zeros([batch_size, num_steps, max_word_length],
-                                np.int32)
+        token_inputs = np.zeros([batch_size, num_steps], np.int32)
+        if max_token_count_in_sentence is not None:
+            char_inputs = np.zeros([batch_size, num_steps, max_token_count_in_sentence],
+                                   np.int32)
         else:
             char_inputs = None
-        targets = np.zeros([batch_size, num_steps], np.int32)
+        target_tokens = np.zeros([batch_size, num_steps], np.int32)
 
         for i in range(batch_size):
             cur_pos = 0
@@ -330,20 +333,20 @@ def _get_batch(generator, batch_size, num_steps, max_word_length):
                         # No more data, exhaust current streams and quit
                         no_more_data = True
                         break
-
+                # cur_stream[i][0]: token_ids, cur_stream[i][1]:char_ids
                 how_many = min(len(cur_stream[i][0]) - 1, num_steps - cur_pos)
                 next_pos = cur_pos + how_many
 
-                inputs[i, cur_pos:next_pos] = cur_stream[i][0][:how_many]
-                if max_word_length is not None:
-                    char_inputs[i, cur_pos:next_pos] = cur_stream[i][1][
-                                                                    :how_many]
-                targets[i, cur_pos:next_pos] = cur_stream[i][0][1:how_many+1]
+                token_inputs[i, cur_pos:next_pos] = cur_stream[i][0][:how_many]
+                if max_token_count_in_sentence is not None:
+                    char_inputs[i, cur_pos:next_pos] = cur_stream[i][1][:how_many]
+                # target需要偏移一位
+                target_tokens[i, cur_pos:next_pos] = cur_stream[i][0][1:how_many + 1]
 
                 cur_pos = next_pos
 
                 cur_stream[i][0] = cur_stream[i][0][how_many:]
-                if max_word_length is not None:
+                if max_token_count_in_sentence is not None:
                     cur_stream[i][1] = cur_stream[i][1][how_many:]
 
         if no_more_data:
@@ -351,8 +354,9 @@ def _get_batch(generator, batch_size, num_steps, max_word_length):
             # for the incomplete batch
             break
 
-        X = {'token_ids': inputs, 'tokens_characters': char_inputs,
-                 'next_token_id': targets}
+        X = {'token_ids': token_inputs,
+             'tokens_characters': char_inputs,
+             'next_token_id': target_tokens}
 
         yield X
 
@@ -374,14 +378,14 @@ class LMDataset(object):
         shuffle_on_load = if True, then shuffle the sentences after loading.
         '''
         self._vocab = vocab
-        self._all_shards = glob.glob(filepattern)
+        self._all_shards = glob.glob(filepattern) # 用正则表达式来加载所需文件 list
         print('Found %d shards at %s' % (len(self._all_shards), filepattern))
         self._shards_to_choose = []
 
         self._reverse = reverse
         self._test = test
         self._shuffle_on_load = shuffle_on_load
-        self._use_char_inputs = hasattr(vocab, 'encode_chars')
+        self._use_char_inputs = hasattr(vocab, 'encode_sentence_to_char_ids')
 
         self._ids = self._load_random_shard()
 
@@ -401,15 +405,15 @@ class LMDataset(object):
                 # and stop iterating
                 raise StopIteration
             else:
-                shard_name = self._all_shards.pop()
+                shard_name = self._all_shards.pop() # list
         else:
             # just pick a random shard
             shard_name = self._choose_random_shard()
 
-        ids = self._load_shard(shard_name)
+        token_ids_and_char_ids = self._load_shard(shard_name)
         self._i = 0
-        self._nids = len(ids)
-        return ids
+        self._nids = len(token_ids_and_char_ids)
+        return token_ids_and_char_ids
 
     def _load_shard(self, shard_name):
         """Read one file and convert to ids.
@@ -428,6 +432,7 @@ class LMDataset(object):
             sentences = []
             for sentence in sentences_raw:
                 splitted = sentence.split()
+                # 如果为逆序
                 splitted.reverse()
                 sentences.append(' '.join(splitted))
         else:
@@ -436,28 +441,28 @@ class LMDataset(object):
         if self._shuffle_on_load:
             random.shuffle(sentences)
 
-        ids = [self.vocab.encode(sentence, self._reverse)
+        token_ids = [self.vocab.encode_sentence_to_token_ids(sentence, self._reverse)
                for sentence in sentences]
         if self._use_char_inputs:
             chars_ids = [self.vocab.encode_sentence_to_char_ids(sentence, self._reverse)
                      for sentence in sentences]
         else:
-            chars_ids = [None] * len(ids)
+            chars_ids = [None] * len(token_ids)
 
-        print('Loaded %d sentences.' % len(ids))
+        print('Loaded %d sentences.' % len(token_ids))
         print('Finished loading')
-        return list(zip(ids, chars_ids))
+        return list(zip(token_ids, chars_ids))
 
     def get_sentence(self):
         while True:
             if self._i == self._nids:
                 self._ids = self._load_random_shard()
-            ret = self._ids[self._i]
+            token_ids_and_char_ids = self._ids[self._i]
             self._i += 1
-            yield ret
+            yield token_ids_and_char_ids
 
     @property
-    def max_word_length(self):
+    def max_char_count_in_token(self):
         if self._use_char_inputs:
             return self._vocab.max_char_count_in_token
         else:
@@ -465,7 +470,7 @@ class LMDataset(object):
 
     def iter_batches(self, batch_size, num_steps):
         for X in _get_batch(self.get_sentence(), batch_size, num_steps,
-                           self.max_word_length):
+                            self.max_char_count_in_token):
 
             # token_ids = (batch_size, num_steps)
             # char_inputs = (batch_size, num_steps, 50) of character ids
@@ -489,16 +494,21 @@ class BidirectionalLMDataset(object):
             shuffle_on_load=shuffle_on_load)
 
     def iter_batches(self, batch_size, num_steps):
-        max_word_length = self._data_forward.max_word_length
-
-        for X, Xr in zip(
+        max_char_count_in_word = self._data_forward.max_char_count_in_token
+        """
+          X = {'token_ids': token_inputs,
+             'tokens_characters': char_inputs,
+             'next_token_id': target_tokens}
+        """
+        for X, X_reverse in zip(
             _get_batch(self._data_forward.get_sentence(), batch_size,
-                      num_steps, max_word_length),
+                       num_steps, max_char_count_in_word),
             _get_batch(self._data_reverse.get_sentence(), batch_size,
-                      num_steps, max_word_length)
+                       num_steps, max_char_count_in_word)
             ):
 
-            for k, v in Xr.items():
+            # 将X_reverse的值加入X
+            for k, v in X_reverse.items():
                 X[k + '_reverse'] = v
 
             yield X

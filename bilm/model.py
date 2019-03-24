@@ -5,7 +5,7 @@ import h5py
 import json
 import re
 
-from .data import UnicodeCharsVocabulary, Batcher
+from .data import UnicodeCharsVocabulary, CharBatcher
 
 DTYPE = 'float32'
 DTYPE_INT = 'int64'
@@ -611,7 +611,7 @@ def dump_token_embeddings(vocab_file, options_file, weight_file, outfile):
     max_word_length = options['char_cnn']['max_characters_per_token']
 
     vocab = UnicodeCharsVocabulary(vocab_file, max_word_length)
-    batcher = Batcher(vocab_file, max_word_length)
+    batcher = CharBatcher(vocab_file, max_word_length)
 
     ids_placeholder = tf.placeholder('int32',
                                      shape=(None, None, max_word_length)
@@ -647,7 +647,7 @@ def dump_bilm_embeddings(vocab_file, dataset_file, options_file,
     max_word_length = options['char_cnn']['max_characters_per_token']
 
     vocab = UnicodeCharsVocabulary(vocab_file, max_word_length)
-    batcher = Batcher(vocab_file, max_word_length)
+    batcher = CharBatcher(vocab_file, max_word_length)
 
     ids_placeholder = tf.placeholder('int32',
                                      shape=(None, None, max_word_length)
