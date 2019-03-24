@@ -10,7 +10,7 @@ from bilm.model import BidirectionalLanguageModel
 from bilm.data import Batcher
 from bilm.elmo import weight_layers
 
-FIXTURES = 'tests/fixtures/model/'
+FIXTURES = 'fixtures/model/'
 
 
 

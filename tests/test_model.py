@@ -12,7 +12,7 @@ import tensorflow as tf
 from bilm.model import BidirectionalLanguageModel, dump_token_embeddings
 from bilm.data import Batcher, TokenBatcher
 
-FIXTURES = 'tests/fixtures/model/'
+FIXTURES = 'fixtures/model/'
 
 
 def _load_sentences_embeddings():

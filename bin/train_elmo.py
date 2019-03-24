@@ -65,9 +65,9 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--save_dir', help='Location of checkpoint files')
-    parser.add_argument('--vocab_file', help='Vocabulary file')
-    parser.add_argument('--train_prefix', help='Prefix for train files')
+    parser.add_argument('--save_dir', default='../data/checkpoint/', help='Location of checkpoint files')
+    parser.add_argument('--vocab_file', default='../tests/fixtures/train/vocab.txt', help='Vocabulary file')
+    parser.add_argument('--train_prefix', default='../tests/fixtures/train/data.txt', help='Prefix for train files')
 
     args = parser.parse_args()
     main(args)

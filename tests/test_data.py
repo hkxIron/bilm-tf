@@ -7,8 +7,8 @@ import numpy as np
 from bilm.data import UnicodeCharsVocabulary, Vocabulary, \
     Batcher, TokenBatcher, LMDataset, BidirectionalLMDataset
 
-DATA_FIXTURES = 'tests/fixtures/data/'
-TRAIN_FIXTURES = 'tests/fixtures/train/'
+DATA_FIXTURES = 'fixtures/data/'
+TRAIN_FIXTURES = 'fixtures/train/'
 
 
 class TestVocabulary(unittest.TestCase):
@@ -60,20 +60,20 @@ class TestUnicodeCharsVocabulary(unittest.TestCase):
 
     def test_bos_eos(self):
         bos_ids = self.vocab.word_to_char_ids('<S>')
-        self.assertTrue((bos_ids == self.vocab.bos_chars).all())
+        self.assertTrue((bos_ids == self.vocab.bos_char_ids).all())
 
-        bos_ids = self.vocab.word_char_ids[self.vocab.word_to_id('<S>')]
-        self.assertTrue((bos_ids == self.vocab.bos_chars).all())
+        bos_ids = self.vocab.word_id_to_char_ids_dict[self.vocab.word_to_id('<S>')]
+        self.assertTrue((bos_ids == self.vocab.bos_char_ids).all())
 
         eos_ids = self.vocab.word_to_char_ids('</S>')
-        self.assertTrue((eos_ids == self.vocab.eos_chars).all())
+        self.assertTrue((eos_ids == self.vocab.eos_char_ids).all())
 
-        eos_ids = self.vocab.word_char_ids[self.vocab.word_to_id('</S>')]
-        self.assertTrue((eos_ids == self.vocab.eos_chars).all())
+        eos_ids = self.vocab.word_id_to_char_ids_dict[self.vocab.word_to_id('</S>')]
+        self.assertTrue((eos_ids == self.vocab.eos_char_ids).all())
 
     def test_vocab_encode_chars(self):
         sentence = ' '.join(['th', 'thhhhh', chr(256) + 't'])
-        char_ids = self.vocab.encode_chars(sentence)
+        char_ids = self.vocab.encode_sentence_to_char_ids(sentence)
         expected = np.array(
             [[258, 256, 259, 260, 260],
             [258, 116, 104, 259, 260],
@@ -85,7 +85,7 @@ class TestUnicodeCharsVocabulary(unittest.TestCase):
     def test_vocab_encode_chars_reverse(self):
         sentence = ' '.join(reversed(['th', 'thhhhh', chr(256) + 't']))
         vocab = UnicodeCharsVocabulary(self._tmp, 5)
-        char_ids = vocab.encode_chars(sentence, reverse=True)
+        char_ids = vocab.encode_sentence_to_char_ids(sentence, reverse=True)
         expected = np.array(
             [[258, 256, 259, 260, 260],
             [258, 116, 104, 259, 260],

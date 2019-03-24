@@ -12,7 +12,7 @@ from bilm.training import train, test, load_vocab, \
                                 load_options_latest_checkpoint
 from bilm.data import LMDataset, BidirectionalLMDataset
 
-FIXTURES = 'tests/fixtures/train/'
+FIXTURES = 'fixtures/train/'
 
 class TestLanguageModel(unittest.TestCase):
     def tearDown(self):
