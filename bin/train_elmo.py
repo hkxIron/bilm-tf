@@ -22,11 +22,12 @@ def main(args):
     options = {
      'bidirectional': True,
 
-     'char_cnn': {'activation': 'relu',
+     'char_cnn': {
+      'activation': 'relu',
       'embedding': {'dim': 16},
       'filters': [
-           [1, 32],
-           [2, 32],
+           [1, 32], # kernel_size=1的有32个
+           [2, 32], # kernel_size=2的有32个
            [3, 64],
            #[4, 128],
            #[5, 256],
@@ -34,8 +35,9 @@ def main(args):
            #[7, 1024]
       ],
       'max_characters_per_token': 50,
-      'n_characters': 261,
-      'n_highway': 2},
+      'n_characters': 261, # 256 + 5(mask,unk,sos,eos,padding)
+      'n_highway': 2
+     },
     
      'dropout': 0.1,
     
@@ -47,10 +49,10 @@ def main(args):
       'proj_clip': 3,
       #'projection_dim': 512,
       'projection_dim': 10, # TODO
-      'use_skip_connections': True},
+      'use_skip_connections': True
+     },
     
      'all_clip_norm_val': 10.0,
-    
      'n_epochs': 10,
      'n_train_tokens': n_train_tokens,
      'batch_size': batch_size,
