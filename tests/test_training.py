@@ -141,11 +141,9 @@ class TestLanguageModel(unittest.TestCase):
         # now test
         tf.reset_default_graph()
         options, ckpt_file = load_options_latest_checkpoint(self.tmp_dir)
-        data_test, vocab_test = self._get_data(
-            bidirectional, use_chars, test=True)
+        data_test, vocab_test = self._get_data(bidirectional, use_chars, test=True)
         perplexity = test(options, ckpt_file, data_test, batch_size=1)
         self.assertTrue(perplexity < 20.0)
-
 
 if __name__ == '__main__':
     unittest.main()

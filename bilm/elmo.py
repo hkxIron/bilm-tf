@@ -1,6 +1,6 @@
-
 import tensorflow as tf
 
+# elmo会将不同层加权平均起来
 def weight_layers(name, bilm_ops, l2_coef=None,
                   use_top_only=False, do_layer_norm=False):
     '''

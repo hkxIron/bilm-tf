@@ -1,4 +1,10 @@
 # bilm-tf
+
+![layer](img/layers.png)
+
+![model](img/elmo.png)
+
+
 Tensorflow implementation of the pretrained biLM used to compute ELMo
 representations from ["Deep contextualized word representations"](http://arxiv.org/abs/1802.05365).
 

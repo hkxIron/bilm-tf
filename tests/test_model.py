@@ -14,7 +14,6 @@ from bilm.data import CharBatcher, TokenBatcher
 
 FIXTURES = 'fixtures/model/'
 
-
 def _load_sentences_embeddings():
     # get the raw data
     with open(os.path.join(FIXTURES,

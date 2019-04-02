@@ -38,7 +38,11 @@ def main(args):
     if args.batch_size > 0:
         options['batch_size'] = args.batch_size
 
-    train(options, data, args.n_gpus, tf_save_dir, tf_log_dir,
+    train(options,
+          data,
+          args.n_gpus,
+          tf_save_dir,
+          tf_log_dir,
           restart_ckpt_file=ckpt_file)
 
 

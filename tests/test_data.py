@@ -1,4 +1,4 @@
-
+#coding:utf-8
 import unittest
 import tempfile
 import os
@@ -14,7 +14,8 @@ TRAIN_FIXTURES = 'fixtures/train/'
 class TestVocabulary(unittest.TestCase):
     def setUp(self):
         words = ['<S>', '</S>', '<UNK>', 'the', '.']
-        (_, tmp) = tempfile.mkstemp()
+        #(_, tmp) = tempfile.mkstemp()
+        tmp ="tmp"
         with open(tmp, 'w') as fout:
             fout.write('\n'.join(words))
         self._tmp = tmp
@@ -39,8 +40,9 @@ class TestVocabulary(unittest.TestCase):
 class TestUnicodeCharsVocabulary(unittest.TestCase):
     def setUp(self):
         words = ['the', '.', chr(256) + 't', '<S>', '</S>', '<UNK>']
-        (_, tmp) = tempfile.mkstemp()
-        with open(tmp, 'w') as fout:
+        #(_, tmp) = tempfile.mkstemp()
+        tmp ="tmp"
+        with open(tmp, 'w', encoding="utf-8") as fout:
             fout.write('\n'.join(words))
         self.vocab = UnicodeCharsVocabulary(tmp, 5)
         self._tmp = tmp
@@ -202,13 +204,15 @@ class TestTokenBatcher(unittest.TestCase):
 class TestLMDataset(unittest.TestCase):
     def setUp(self):
         sentences = ['the unknown .', 'th .', 'the']
-        (_, tmp_train) = tempfile.mkstemp()
+        #(_, tmp_train) = tempfile.mkstemp()
+        tmp_train ="tmp_train"
         with open(tmp_train, 'w') as fout:
             fout.write('\n'.join(sentences))
 
         words = ['<S>', '</S>', '<UNK>', 'the', '.', chr(256) + 't']
-        (_, tmp_vocab) = tempfile.mkstemp()
-        with open(tmp_vocab, 'w') as fout:
+        #(_, tmp_vocab) = tempfile.mkstemp()
+        tmp_vocab ="tmp_vocab"
+        with open(tmp_vocab, 'w', encoding="utf-8") as fout:
             fout.write('\n'.join(words))
 
         self._tmp_train = tmp_train

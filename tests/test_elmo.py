@@ -12,8 +12,6 @@ from bilm.elmo import weight_layers
 
 FIXTURES = 'fixtures/model/'
 
-
-
 class TestWeightedLayers(unittest.TestCase):
     def tearDown(self):
         tf.reset_default_graph()

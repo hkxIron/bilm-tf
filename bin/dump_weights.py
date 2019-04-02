@@ -2,7 +2,7 @@
 
 import argparse
 
-from bilm.training import dump_weights as dw
+from bilm.training import dump_weights
 
 
 if __name__ == '__main__':
@@ -11,5 +11,5 @@ if __name__ == '__main__':
     parser.add_argument('--outfile', help='Output hdf5 file with weights')
 
     args = parser.parse_args()
-    dw(args.save_dir, args.outfile)
+    dump_weights(args.save_dir, args.outfile)
 
