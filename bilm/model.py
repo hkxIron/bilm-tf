@@ -1,4 +1,3 @@
-
 import numpy as np
 import tensorflow as tf
 import h5py
@@ -43,6 +42,7 @@ class BidirectionalLanguageModel(object):
         with open(options_file, 'r') as fin:
             options = json.load(fin)
 
+        # 如果不使用char_embedding,需要有token_embedding的file
         if not use_character_inputs:
             if embedding_weight_file is None:
                 raise ValueError(
@@ -69,9 +69,9 @@ class BidirectionalLanguageModel(object):
              'mask': op to compute mask}
 
         embedding_op computes the LM embeddings and is shape
-            (None, 3, None, 1024)
-        lengths_op computes the sequence lengths and is shape (None, )
-        mask computes the sequence mask and is shape (None, None)
+            (None, 3, None, 1024) => [batch, layer_num, time_steps, embedding_size]
+        lengths_op computes the sequence lengths and is shape (None, ) => [batch]
+        mask computes the sequence mask and is shape (None, None), => 即[batch, time_steps]
 
         ids_placeholder: a tf.placeholder of type int32.
             If use_character_inputs=True, it is shape
@@ -96,6 +96,7 @@ class BidirectionalLanguageModel(object):
                     use_character_inputs=self._use_character_inputs,
                     max_batch_size=self._max_batch_size)
             else:
+                # reuse variables
                 with tf.variable_scope('', reuse=True):
                     lm_graph = BidirectionalLanguageModelGraph(
                         self._options,
@@ -115,25 +116,32 @@ class BidirectionalLanguageModel(object):
     def _build_ops(self, lm_graph):
         with tf.control_dependencies([lm_graph.update_state_op]):
             # get the LM embeddings
+            # embedding:[batch, unroll_steps, projection_dim]
             token_embeddings = lm_graph.embedding
+            # layers:[ [batch, unroll_steps, projection_dim*2] ]
+            # 1.先将原始的embedding层加入,一个是前向,一个是后向
             layers = [
                 tf.concat([token_embeddings, token_embeddings], axis=2)
             ]
 
             n_lm_layers = len(lm_graph.lstm_outputs['forward'])
+            # 2.加入不同层的 embedding
+            # lstm不同的层数,不同层代表不同的特层
+            # 一般认为低层代表词法信息,高层代表语义信息
             for i in range(n_lm_layers):
                 layers.append(
                     tf.concat(
                         [lm_graph.lstm_outputs['forward'][i],
                          lm_graph.lstm_outputs['backward'][i]],
-                        axis=-1
-                    )
+                        axis=-1)
                 )
 
             # The layers include the BOS/EOS tokens.  Remove them
             sequence_length_wo_bos_eos = lm_graph.sequence_lengths - 2
             layers_without_bos_eos = []
             for layer in layers:
+                # 去掉首尾的bos/eos居然用这种奇淫巧技
+                # layer:[batch, unroll_steps, projection_dim*2]
                 layer_wo_bos_eos = layer[:, 1:, :]
                 layer_wo_bos_eos = tf.reverse_sequence(
                     layer_wo_bos_eos, 
@@ -151,6 +159,8 @@ class BidirectionalLanguageModel(object):
                 layers_without_bos_eos.append(layer_wo_bos_eos)
 
             # concatenate the layers
+            # t:[batch, unroll_steps, projection_dim*2]
+            # lm_embeddings:[batch, layer_num, unroll_steps, projection_dim*2]
             lm_embeddings = tf.concat(
                 [tf.expand_dims(t, axis=1) for t in layers_without_bos_eos],
                 axis=1
@@ -159,6 +169,7 @@ class BidirectionalLanguageModel(object):
             # get the mask op without bos/eos.
             # tf doesn't support reversing boolean tensors, so cast
             # to int then back
+            # 奇淫巧技
             mask_wo_bos_eos = tf.cast(lm_graph.mask[:, 1:], 'int32')
             mask_wo_bos_eos = tf.reverse_sequence(
                 mask_wo_bos_eos,
@@ -176,31 +187,49 @@ class BidirectionalLanguageModel(object):
             mask_wo_bos_eos = tf.cast(mask_wo_bos_eos, 'bool')
 
         return {
-            'lm_embeddings': lm_embeddings, 
+            'lm_embeddings': lm_embeddings, # lm_embeddings:[batch, layer_num, unroll_steps, projection_dim*2]
             'lengths': sequence_length_wo_bos_eos,
-            'token_embeddings': lm_graph.embedding,
-            'mask': mask_wo_bos_eos,
+            'token_embeddings': lm_graph.embedding, # embedding:[batch, unroll_steps, projection_dim]
+            'mask': mask_wo_bos_eos, # mask:[batch, unroll_step-2]
         }
 
 
-def _pretrained_initializer(varname, weight_file, embedding_weight_file=None):
+def _pretrained_initializer(varname:str, weight_file:str, embedding_weight_file=None):
     '''
-    We'll stub out all the initializers in the pretrained LM with
+    We'll stub out(去掉) all the initializers in the pretrained LM with
     a function that loads the weights from the file
+
+    我们将去掉模型中的所有初始值设定项。
     '''
+
+    """
+     ['lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/bias:0',  TensorShape([Dimension(120)])],
+     ['lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/kernel:0',  TensorShape([Dimension(20),Dimension(120)])],
+     ['lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/projection/kernel:0',  TensorShape([Dimension(30),Dimension(10)])],
+
+     ['lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/bias:0',  TensorShape([Dimension(120)])],
+     ['lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/kernel:0',  TensorShape([Dimension(20),Dimension(120)])],
+     ['lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/projection/kernel:0',  TensorShape([Dimension(30),Dimension(10)])],
+
+     ['lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/bias:0',  TensorShape([Dimension(120)])],
+     ['lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/kernel:0',  TensorShape([Dimension(20),Dimension(120)])],
+     ['lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/projection/kernel:0',  TensorShape([Dimension(30),Dimension(10)])],
+
+     ['lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/bias:0',  TensorShape([Dimension(120)])],
+     ['lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/kernel:0',  TensorShape([Dimension(20),Dimension(120)])],
+     ['lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/projection/kernel:0',  TensorShape([Dimension(30),Dimension(10)])],
+    """
+
     weight_name_map = {}
-    for i in range(2):
-        for j in range(8):  # if we decide to add more layers
+    for i in range(2): # i为正向或者反向
+        for j in range(8):  # if we decide to add more layers, lstm stacked的层数
             root = 'RNN_{}/RNN/MultiRNNCell/Cell{}'.format(i, j)
-            weight_name_map[root + '/rnn/lstm_cell/kernel'] = \
-                root + '/LSTMCell/W_0'
-            weight_name_map[root + '/rnn/lstm_cell/bias'] = \
-                root + '/LSTMCell/B'
-            weight_name_map[root + '/rnn/lstm_cell/projection/kernel'] = \
-                root + '/LSTMCell/W_P_0'
+            weight_name_map[root + '/rnn/lstm_cell/kernel'] =  root + '/LSTMCell/W_0'
+            weight_name_map[root + '/rnn/lstm_cell/bias'] = root + '/LSTMCell/B'
+            weight_name_map[root + '/rnn/lstm_cell/projection/kernel'] = root + '/LSTMCell/W_P_0'
 
     # convert the graph name to that in the checkpoint
-    varname_in_file = varname[5:]
+    varname_in_file = varname[5:] # str
     if varname_in_file.startswith('RNN'):
         varname_in_file = weight_name_map[varname_in_file]
 
@@ -209,8 +238,7 @@ def _pretrained_initializer(varname, weight_file, embedding_weight_file=None):
             # Have added a special 0 index for padding not present
             # in the original model.
             embed_weights = fin[varname_in_file][...]
-            weights = np.zeros(
-                (embed_weights.shape[0] + 1, embed_weights.shape[1]),
+            weights = np.zeros((embed_weights.shape[0] + 1, embed_weights.shape[1]),
                 dtype=DTYPE
             )
             weights[1:, :] = embed_weights
@@ -221,8 +249,7 @@ def _pretrained_initializer(varname, weight_file, embedding_weight_file=None):
                 # in the original model.
                 char_embed_weights = fin[varname_in_file][...]
                 weights = np.zeros(
-                    (char_embed_weights.shape[0] + 1,
-                     char_embed_weights.shape[1]),
+                    (char_embed_weights.shape[0] + 1, char_embed_weights.shape[1]),
                     dtype=DTYPE
                 )
                 weights[1:, :] = char_embed_weights
@@ -232,6 +259,7 @@ def _pretrained_initializer(varname, weight_file, embedding_weight_file=None):
     # Tensorflow initializers are callables that accept a shape parameter
     # and some optional kwargs
     def ret(shape, **kwargs):
+        # 用这个函数,就是为了检查shape是否对得上
         if list(shape) != list(weights.shape):
             raise ValueError(
                 "Invalid shape initializing {0}, got {1}, expected {2}".format(
@@ -248,7 +276,8 @@ class BidirectionalLanguageModelGraph(object):
     a bidirectional language model
     '''
     def __init__(self, options, weight_file, ids_placeholder,
-                 use_character_inputs=True, embedding_weight_file=None,
+                 use_character_inputs=True,
+                 embedding_weight_file=None,
                  max_batch_size=128):
 
         self.options = options
@@ -258,14 +287,12 @@ class BidirectionalLanguageModelGraph(object):
 
         # this custom_getter will make all variables not trainable and
         # override the default initializer
-        def custom_getter(getter, name, *args, **kwargs):
+        def custom_getter(getter, name:str, *args, **kwargs):
             kwargs['trainable'] = False
-            kwargs['initializer'] = _pretrained_initializer(
-                name, weight_file, embedding_weight_file
-            )
+            kwargs['initializer'] = _pretrained_initializer(name, weight_file, embedding_weight_file)
             return getter(name, *args, **kwargs)
 
-        if embedding_weight_file is not None:
+        if embedding_weight_file:
             # get the vocab size
             with h5py.File(embedding_weight_file, 'r') as fin:
                 # +1 for padding
@@ -283,6 +310,7 @@ class BidirectionalLanguageModelGraph(object):
             self._build_word_embeddings()
         self._build_lstms()
 
+    # 此函数与training.py中类似,可以参考它的注释
     def _build_word_char_embeddings(self):
         '''
         options contains key 'char_cnn': {
@@ -293,7 +321,7 @@ class BidirectionalLanguageModelGraph(object):
         'max_characters_per_token': 50,
 
         'filters': [
-            [1, 32],
+            [1, 32],  # kernel=1,filter_count=32
             [2, 32],
             [3, 64],
             [4, 128],
@@ -315,7 +343,7 @@ class BidirectionalLanguageModelGraph(object):
 
         cnn_options = self.options['char_cnn']
         filters = cnn_options['filters']
-        n_filters = sum(f[1] for f in filters)
+        n_filters = sum(f[1] for f in filters) # filter:[kernel,num]
         max_chars = cnn_options['max_characters_per_token']
         char_embed_dim = cnn_options['embedding']['dim']
         n_chars = cnn_options['n_characters']
@@ -339,11 +367,14 @@ class BidirectionalLanguageModelGraph(object):
             self.char_embedding = tf.nn.embedding_lookup(self.embedding_weights,
                                                     self.ids_placeholder)
 
+        # 与training.py不同的时,这里不需要bi-lstm了
+
         # the convolutions
-        def make_convolutions(inp):
+        def make_convolutions(input):
             with tf.variable_scope('CNN') as scope:
                 convolutions = []
                 for i, (width, num) in enumerate(filters):
+                    # filters:[ [1, 32], ... ] # kernel=1,filter_count=32
                     if cnn_options['activation'] == 'relu':
                         # He initialization for ReLU activation
                         # with char embeddings init between -1 and 1
@@ -353,8 +384,7 @@ class BidirectionalLanguageModelGraph(object):
                         #)
 
                         # Kim et al 2015, +/- 0.05
-                        w_init = tf.random_uniform_initializer(
-                            minval=-0.05, maxval=0.05)
+                        w_init = tf.random_uniform_initializer( minval=-0.05, maxval=0.05)
                     elif cnn_options['activation'] == 'tanh':
                         # glorot init
                         w_init = tf.random_normal_initializer(
@@ -371,7 +401,7 @@ class BidirectionalLanguageModelGraph(object):
                         initializer=tf.constant_initializer(0.0))
 
                     conv = tf.nn.conv2d(
-                            inp, w,
+                            input, w,
                             strides=[1, 1, 1, 1],
                             padding="VALID") + b
                     # now max pool
@@ -383,10 +413,14 @@ class BidirectionalLanguageModelGraph(object):
                     conv = activation(conv)
                     conv = tf.squeeze(conv, squeeze_dims=[2])
 
+                    # convolutions:[ [batch, unroll_steps, filter_num], [b, u, f], ... ]
                     convolutions.append(conv)
 
+            # convolutions:[batch, unroll_steps, total_filter_num]
             return tf.concat(convolutions, 2)
 
+        # char_embedding: [batch_size, unroll_steps, max_chars, embed_dim]
+        # embedding:[batch, unroll_steps, total_filter_num]
         embedding = make_convolutions(self.char_embedding)
 
         # for highway and projection layers
@@ -395,8 +429,9 @@ class BidirectionalLanguageModelGraph(object):
         use_proj = n_filters != projection_dim
 
         if use_highway or use_proj:
-            #   reshape from (batch_size, n_tokens, dim) to (-1, dim)
+            #   reshape from (batch_size, token_count_per_sentence, dim) to (-1, dim)
             batch_size_n_tokens = tf.shape(embedding)[0:2]
+            # embedding:[batch*unroll_steps=token_count, total_filter_num]
             embedding = tf.reshape(embedding, [-1, n_filters])
 
         # set up weights for projection
@@ -414,7 +449,7 @@ class BidirectionalLanguageModelGraph(object):
                         dtype=DTYPE)
 
         # apply highways layers
-        def high(x, ww_carry, bb_carry, ww_tr, bb_tr):
+        def highway(x, ww_carry, bb_carry, ww_tr, bb_tr):
             carry_gate = tf.nn.sigmoid(tf.matmul(x, ww_carry) + bb_carry)
             transform_gate = tf.nn.relu(tf.matmul(x, ww_tr) + bb_tr)
             return carry_gate * transform_gate + (1.0 - carry_gate) * x
@@ -423,7 +458,7 @@ class BidirectionalLanguageModelGraph(object):
             highway_dim = n_filters
 
             for i in range(n_highway):
-                with tf.variable_scope('CNN_high_%s' % i) as scope:
+                with tf.variable_scope('CNN_highway_%s' % i) as scope:
                     W_carry = tf.get_variable(
                         'W_carry', [highway_dim, highway_dim],
                         # glorit init
@@ -443,12 +478,15 @@ class BidirectionalLanguageModelGraph(object):
                         'b_transform', [highway_dim],
                         initializer=tf.constant_initializer(0.0),
                         dtype=DTYPE)
-
-                embedding = high(embedding, W_carry, b_carry,
-                                 W_transform, b_transform)
+                # embedding:[batch*unroll_steps, total_filter_num=n_filters]
+                # => [batch*unroll_steps, total_filter_num]
+                embedding = highway(embedding, W_carry, b_carry,
+                                    W_transform, b_transform)
 
         # finally project down if needed
         if use_proj:
+            # embedding:[batch*unroll_steps, total_filter_num]
+            # => [batch*unroll_steps, projection_dim]
             embedding = tf.matmul(embedding, W_proj_cnn) + b_proj_cnn
 
         # reshape back to (batch_size, tokens, dim)
@@ -457,6 +495,7 @@ class BidirectionalLanguageModelGraph(object):
             embedding = tf.reshape(embedding, shp)
 
         # at last assign attributes for remainder of the model
+        # embedding:[batch, unroll_steps, projection_dim]
         self.embedding = embedding
 
 
@@ -485,16 +524,22 @@ class BidirectionalLanguageModelGraph(object):
         cell_clip = self.options['lstm'].get('cell_clip')
         proj_clip = self.options['lstm'].get('proj_clip')
         use_skip_connections = self.options['lstm']['use_skip_connections']
+
         if use_skip_connections:
             print("USING SKIP CONNECTIONS")
         else:
             print("NOT USING SKIP CONNECTIONS")
 
         # the sequence lengths from input mask
+        # mask:[batch, unroll_step]
         if self.use_character_inputs:
-            mask = tf.reduce_any(self.ids_placeholder > 0, axis=2)
+            # ids:[batch, unroll_step, char_count_per_token]
+            mask = tf.reduce_any(self.ids_placeholder > 0, axis=2) # true or false
         else:
             mask = self.ids_placeholder > 0
+
+        # mask:[batch, unroll_step]
+        # sequence_lengths:[batch]
         sequence_lengths = tf.reduce_sum(tf.cast(mask, tf.int32), axis=1)
         batch_size = tf.shape(sequence_lengths)[0]
 
@@ -510,22 +555,25 @@ class BidirectionalLanguageModelGraph(object):
                 layer_input = self.embedding
             else:
                 layer_input = tf.reverse_sequence(
-                    self.embedding,
-                    sequence_lengths,
+                    input=self.embedding,
+                    seq_lengths=sequence_lengths,
                     seq_axis=1,
                     batch_axis=0
                 )
 
-            for i in range(n_lstm_layers):
-                if projection_dim < lstm_dim:
+            for i in range(n_lstm_layers): # 多层lstm
+                if projection_dim < lstm_dim: # project_dim:512, lstm_dim:4096
                     # are projecting down output
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
-                        lstm_dim, num_proj=projection_dim,
-                        cell_clip=cell_clip, proj_clip=proj_clip)
+                        num_units=lstm_dim,
+                        num_proj=projection_dim,
+                        cell_clip=cell_clip,
+                        proj_clip=proj_clip)
                 else:
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
-                            lstm_dim,
-                            cell_clip=cell_clip, proj_clip=proj_clip)
+                        num_units=lstm_dim,
+                        cell_clip=cell_clip,
+                        proj_clip=proj_clip)
 
                 if use_skip_connections:
                     # ResidualWrapper adds inputs to outputs
@@ -540,6 +588,7 @@ class BidirectionalLanguageModelGraph(object):
                 # collect the input state, run the dynamic rnn, collect
                 # the output
                 state_size = lstm_cell.state_size
+
                 # the LSTMs are stateful.  To support multiple batch sizes,
                 # we'll allocate size for states up to max_batch_size,
                 # then use the first batch_size entries for each batch
@@ -558,8 +607,7 @@ class BidirectionalLanguageModelGraph(object):
                     i_direction = 0
                 else:
                     i_direction = 1
-                variable_scope_name = 'RNN_{0}/RNN/MultiRNNCell/Cell{1}'.format(
-                    i_direction, i)
+                variable_scope_name = 'RNN_{0}/RNN/MultiRNNCell/Cell{1}'.format(i_direction, i)
                 with tf.variable_scope(variable_scope_name):
                     layer_output, final_state = tf.nn.dynamic_rnn(
                         lstm_cell,
@@ -613,10 +661,13 @@ def dump_token_embeddings(vocab_file, options_file, weight_file, outfile):
     vocab = UnicodeCharsVocabulary(vocab_file, max_word_length)
     batcher = CharBatcher(vocab_file, max_word_length)
 
+    # [batch, token_count_per_sentence, char_count_per_token]
     ids_placeholder = tf.placeholder('int32',
                                      shape=(None, None, max_word_length)
     )
     model = BidirectionalLanguageModel(options_file, weight_file)
+
+    # embedding_op:[batch, unroll_steps, projection_dim]
     embedding_op = model(ids_placeholder)['token_embeddings']
 
     n_tokens = vocab.size
@@ -629,10 +680,10 @@ def dump_token_embeddings(vocab_file, options_file, weight_file, outfile):
         sess.run(tf.global_variables_initializer())
         for k in range(n_tokens):
             token = vocab.id_to_word(k)
-            char_ids = batcher.batch_sentences([[token]])[0, 1, :].reshape(
-                1, 1, -1)
-            embeddings[k, :] = sess.run(
-                embedding_op, feed_dict={ids_placeholder: char_ids}
+            # char_ids: [batch, max_token_count_in_sentence, max_char_count_in_token]
+            # 一个句子中只有一个单词
+            char_ids = batcher.batch_sentences(sentences=[[token]])[0, 1, :].reshape(1, 1, -1)
+            embeddings[k, :] = sess.run(embedding_op, feed_dict={ids_placeholder: char_ids}
             )
 
     with h5py.File(outfile, 'w') as fout:
@@ -662,9 +713,11 @@ def dump_bilm_embeddings(vocab_file, dataset_file, options_file,
         with open(dataset_file, 'r') as fin, h5py.File(outfile, 'w') as fout:
             for line in fin:
                 sentence = line.strip().split()
-                char_ids = batcher.batch_sentences([sentence])
+                # char_ids: [batch, max_token_count_in_sentence, max_char_count_in_token]
+                char_ids = batcher.batch_sentences(sentences=[sentence])
                 embeddings = sess.run(
-                    ops['lm_embeddings'], feed_dict={ids_placeholder: char_ids}
+                    ops['lm_embeddings'], # lm_embeddings:[batch, layer_num, unroll_steps, projection_dim*2]
+                    feed_dict={ids_placeholder: char_ids}
                 )
                 ds = fout.create_dataset(
                     '{}'.format(sentence_id),
@@ -673,4 +726,3 @@ def dump_bilm_embeddings(vocab_file, dataset_file, options_file,
                 )
 
                 sentence_id += 1
-

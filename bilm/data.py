@@ -96,6 +96,9 @@ class Vocabulary(object):
         If reverse, then the sentence is assumed to be reversed, and
             this method will swap the BOS/EOS tokens appropriately.
             将一个sentenct转化为ids序列,并提供句子反转的功能
+
+            :param sentence:"i love nlp"
+            :return [123, 45, 6]
             """
 
         if split:
@@ -306,17 +309,18 @@ class TokenBatcher(object): # change to token id matrix
 
 
 ##### for training
-# generator: 生成 (token_ids, char_ids)
+# generator: 从文件中生成 (token_ids, char_ids),每条样本一行记录,如 函数get_sentences()
 # 返回: token_inputs, char_inputs, target_tokens
-def _get_batch(generator, batch_size, num_steps, max_token_count_in_sentence):
+def _get_batch(generator, batch_size, num_steps, max_char_count_in_word):
     """Read batches of input."""
     cur_stream = [None] * batch_size
 
     no_more_data = False
     while True:
+        # token_inputs:[batch_size, num_steps]
         token_inputs = np.zeros([batch_size, num_steps], np.int32)
-        if max_token_count_in_sentence is not None:
-            char_inputs = np.zeros([batch_size, num_steps, max_token_count_in_sentence],
+        if max_char_count_in_word:
+            char_inputs = np.zeros([batch_size, num_steps, max_char_count_in_word],
                                    np.int32)
         else:
             char_inputs = None
@@ -325,35 +329,48 @@ def _get_batch(generator, batch_size, num_steps, max_token_count_in_sentence):
         for i in range(batch_size):
             cur_pos = 0
 
-            while cur_pos < num_steps:
+            while cur_pos < num_steps: # 时间步
+                # cur_steam[i]中数据为空,需要重新从generater中获取
                 if cur_stream[i] is None or len(cur_stream[i][0]) <= 1:
                     try:
-                        cur_stream[i] = list(next(generator))
+                        # cur_steam[i]:[
+                        #   (token_ids:[sentence_count, token_count_per_sentence],
+                        #    char_ids:[sentence_count, token_count_per_sentence, char_count_per_token])
+                        #   ...
+                        #   (token_ids:[sentence_count, token_count_per_sentence],
+                        #    char_ids:[sentence_count, token_count_per_sentence, char_count_per_token])
+                        # ]
+                        cur_stream[i] = list(next(generator)) # 获取下一个句子作为记录
                     except StopIteration:
                         # No more data, exhaust current streams and quit
                         no_more_data = True
                         break
+
                 # cur_stream[i][0]: token_ids, cur_stream[i][1]:char_ids
-                how_many = min(len(cur_stream[i][0]) - 1, num_steps - cur_pos)
-                next_pos = cur_pos + how_many
+                token_count = len(cur_stream[i][0]) - 1
+                token_offset = min(token_count, num_steps - cur_pos)
+                next_pos = cur_pos + token_offset
 
-                token_inputs[i, cur_pos:next_pos] = cur_stream[i][0][:how_many]
-                if max_token_count_in_sentence is not None:
-                    char_inputs[i, cur_pos:next_pos] = cur_stream[i][1][:how_many]
+                token_inputs[i, cur_pos:next_pos] = cur_stream[i][0][:token_offset]
+                if max_char_count_in_word:
+                    char_inputs[i, cur_pos:next_pos] = cur_stream[i][1][:token_offset]
+
                 # target需要偏移一位
-                target_tokens[i, cur_pos:next_pos] = cur_stream[i][0][1:how_many + 1]
-
+                target_tokens[i, cur_pos:next_pos] = cur_stream[i][0][1:token_offset + 1]
                 cur_pos = next_pos
-
-                cur_stream[i][0] = cur_stream[i][0][how_many:]
-                if max_token_count_in_sentence is not None:
-                    cur_stream[i][1] = cur_stream[i][1][how_many:]
+                # 将句子中剩余的句子作为下一个time_step的数据
+                cur_stream[i][0] = cur_stream[i][0][token_offset:]
+                if max_char_count_in_word:
+                    cur_stream[i][1] = cur_stream[i][1][token_offset:]
 
         if no_more_data:
             # There is no more data.  Note: this will not return data
             # for the incomplete batch
             break
 
+        # token_ids:[sentence_count, token_count_per_sentence],
+        # tokens_characters:[sentence_count, token_count_per_sentence, char_count_per_token],
+        # next_token_id:[sentence_count, token_count_per_sentence]
         X = {'token_ids': token_inputs,
              'tokens_characters': char_inputs,
              'next_token_id': target_tokens}
@@ -387,7 +404,7 @@ class LMDataset(object):
         self._shuffle_on_load = shuffle_on_load
         self._use_char_inputs = hasattr(vocab, 'encode_sentence_to_char_ids')
 
-        self._ids = self._load_random_shard()
+        self._ids = self._load_random_shard_file()
 
     def _choose_random_shard(self):
         if len(self._shards_to_choose) == 0:
@@ -396,7 +413,7 @@ class LMDataset(object):
         shard_name = self._shards_to_choose.pop()
         return shard_name
 
-    def _load_random_shard(self):
+    def _load_random_shard_file(self):
         """Randomly select a file and read it."""
         if self._test:
             if len(self._all_shards) == 0:
@@ -405,14 +422,16 @@ class LMDataset(object):
                 # and stop iterating
                 raise StopIteration
             else:
-                shard_name = self._all_shards.pop() # list
+                shard_name = self._all_shards.pop() # list, 按顺序取一个样本文件,每次pop,list会少一个元素
         else:
             # just pick a random shard
             shard_name = self._choose_random_shard()
 
+        # token_ids:[sentence_count, token_count_per_sentence], 二维句子id列表
+        # chars_ids:[sentence_count, token_count_per_sentence, char_count_per_token]
         token_ids_and_char_ids = self._load_shard(shard_name)
         self._i = 0
-        self._nids = len(token_ids_and_char_ids)
+        self._nids = len(token_ids_and_char_ids) # nids:此文件中有多少样本
         return token_ids_and_char_ids
 
     def _load_shard(self, shard_name):
@@ -422,7 +441,10 @@ class LMDataset(object):
             shard_name: file path.
 
         Returns:
-            list of (id, char_id) tuples.
+            list of (token_id, char_id) tuples.
+            其中:
+            token_ids:[sentence_count, token_count_per_sentence], 二维句子id列表
+            chars_ids:[sentence_count, token_count_per_sentence, char_count_per_token]
         """
         print('Loading data from: %s' % shard_name)
         with open(shard_name) as f:
@@ -440,10 +462,11 @@ class LMDataset(object):
 
         if self._shuffle_on_load:
             random.shuffle(sentences)
-
+        # token_ids:[sentence_count, token_count_per_sentence], 二维句子id列表
         token_ids = [self.vocab.encode_sentence_to_token_ids(sentence, self._reverse)
                for sentence in sentences]
         if self._use_char_inputs:
+            # chars_ids:[sentence_count, token_count_per_sentence, char_count_per_token]
             chars_ids = [self.vocab.encode_sentence_to_char_ids(sentence, self._reverse)
                      for sentence in sentences]
         else:
@@ -451,12 +474,16 @@ class LMDataset(object):
 
         print('Loaded %d sentences.' % len(token_ids))
         print('Finished loading')
+        # token_ids:[sentence_count, token_count_per_sentence], 二维句子id列表
+        # chars_ids:[sentence_count, token_count_per_sentence, char_count_per_token]
         return list(zip(token_ids, chars_ids))
 
     def get_sentence(self):
         while True:
-            if self._i == self._nids:
-                self._ids = self._load_random_shard()
+            if self._i == self._nids: # nids:该文件中样本数
+                self._ids = self._load_random_shard_file()
+            # token_ids:[sentence_count, token_count_per_sentence], 二维句子id列表
+            # chars_ids:[sentence_count, token_count_per_sentence, char_count_per_token]
             token_ids_and_char_ids = self._ids[self._i]
             self._i += 1
             yield token_ids_and_char_ids
@@ -469,11 +496,17 @@ class LMDataset(object):
             return None
 
     def iter_batches(self, batch_size, num_steps):
-        for X in _get_batch(self.get_sentence(), batch_size, num_steps,
-                            self.max_char_count_in_token):
+        for X in _get_batch(generator=self.get_sentence(), # 获取 token_ids以及char_ids
+                            batch_size=batch_size,
+                            num_steps=num_steps,
+                            max_char_count_in_word=self.max_char_count_in_token):
+
+            # token_ids:[batch_size, token_count_per_sentence],
+            # tokens_characters:[batch_size, token_count_per_sentence, char_count_per_token],
+            # next_token_id:[batch_size, token_count_per_sentence]
 
             # token_ids = (batch_size, num_steps)
-            # char_inputs = (batch_size, num_steps, 50) of character ids
+            # char_inputs = (batch_size, num_steps, max_char_count_per_token=50) of character ids
             # targets = word ID of next word (batch_size, num_steps)
             yield X
 
